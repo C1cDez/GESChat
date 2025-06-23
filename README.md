@@ -21,6 +21,9 @@ In command line `geschat-server-gcp-X.Y.exe`. Additional command line arguments:
 
 e.g. `geschat-server-gcp-1.0.exe -p 1161 -b 18` stands for opening server on port 1161 with server's backlog being 18 clients.
 
+**How to exit**:<br>
+Just abort it like console app using Ctrl+C
+
 ---
 
 ### Client
@@ -37,6 +40,9 @@ e.g. `geschat-client-gcp-1.0.exe -p 1161 -h 148.81.161.18` will connect to `148.
 
 **Technical**<br>
 Client uses [ANSI](https://en.wikipedia.org/wiki/ANSI_escape_code) to handle text in console (see Client.cpp)
+
+**How to exit**:<br>
+Type `~!` as a message. It will (probably) safely close all open sockets.
 
 ---
 
@@ -107,4 +113,4 @@ Make encrypting and decrypting messages
 
 ---
 
-That's all
+That's all. Made in 4 days.
