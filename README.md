@@ -42,7 +42,7 @@ e.g. `geschat-client-gcp-1.0.exe -p 1161 -h 148.81.161.18` will connect to `148.
 Client uses [ANSI](https://en.wikipedia.org/wiki/ANSI_escape_code) to handle text in console (see Client.cpp)
 
 **How to exit**:<br>
-Type `~!` as a message. It will (maybe) safely close all sockets.
+Type `~!` as a message. It will (probably) safely close all sockets.
 
 ---
 
@@ -113,4 +113,4 @@ Make encrypting and decrypting messages
 
 ---
 
-That's all
+That's all. Made in 4 days.
