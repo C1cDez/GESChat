@@ -14,11 +14,15 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
+#define CLIENT_EXIT_CODE "~!"
+#define PRIVATE_MESSAGE_REFERENCE_CODE '@'
+
 SOCKET init(PCSTR host, PCSTR port);
 void handshake();
 
 void listenConsole();
 int sendMessage(const char* message);
+int sendPrivateMessage(const char* toUser, const char* message);
 
 void listenServer();
 
@@ -58,7 +62,7 @@ void run(int argc, char* argv[])
 	memset(username, 0, USERNAME_LENGTH);
 	
 	std::cout << "Enter your name: ";
-	std::cin.getline(username, USERNAME_LENGTH);
+	std::cin >> username;
 	username[USERNAME_LENGTH - 1] = 0;
 
 	std::cout << ANSI("1F") << ANSI("J");
@@ -110,16 +114,16 @@ SOCKET init(PCSTR host, PCSTR port)
 
 void handshake()
 {
-	char hsh[HANDSHAKE_L_CS];
-	memset(hsh, 0, HANDSHAKE_L_CS);
+	char hsh[HANDSHAKE_LENGTH_CS];
+	memset(hsh, 0, HANDSHAKE_LENGTH_CS);
 	hsh[0] = HANDSHAKE;
 	hsh[1] = GC_PROTOCOL_VERSION_MAJOR;
 	hsh[2] = GC_PROTOCOL_VERSION_MINOR;
 	copyarray(THIS_CLIENT.username, hsh, 0, 1 + GC_PROTOCOL_VERSION_LENGTH, strlen(THIS_CLIENT.username));
-	THIS_CLIENT.snd(hsh, HANDSHAKE_L_CS);
+	THIS_CLIENT.snd(hsh, HANDSHAKE_LENGTH_CS);
 
-	char hsh_s[HANDSHAKE_L_SC];
-	THIS_CLIENT.rcv(hsh_s, HANDSHAKE_L_SC);
+	char hsh_s[HANDSHAKE_LENGTH_SC];
+	THIS_CLIENT.rcv(hsh_s, HANDSHAKE_LENGTH_SC);
 	if (hsh_s[0] != HANDSHAKE) throw std::exception{ "Invalid server response" };
 
 	char errorCode = hsh_s[1];
@@ -134,6 +138,8 @@ void handshake()
 			std::to_string((int)GC_PROTOCOL_VERSION_MAJOR) + "." + std::to_string((int)GC_PROTOCOL_VERSION_MINOR) + 
 			". Server requires: " + std::to_string((int)serverMajor) + "." + std::to_string((int)serverMinor)).c_str() };
 	}
+	else if (errorCode == SERVER_ERROR_INVALID_USERNAME)
+		throw std::exception{ "Inavlid username. Username must match [a-z;A-Z;0-9;_]" };
 	else if (hsh_s[1] != SERVER_OK) throw std::exception{ ("Server sent error code: " + std::to_string((int)errorCode)).c_str() };
 }
 
@@ -155,6 +161,7 @@ void listenServer()
 
 		char code = buffer[0];
 
+		//TODO: REWRITE IT
 		if (code == BROADCASTING_MESSAGE)
 		{
 			const char* name = buffer + 1;
@@ -173,13 +180,45 @@ void listenServer()
 			std::cout << ANSI("u") << ANSI("J");
 
 			std::cout << ANSI("33;3;1m");
-			if (type == STB_USER_JOINED)
+			if (type == SERVER_TECHNICAL_BROADCASTING_STATUS_USER_JOINED)
 				std::cout << "[SERVER]: " << name << " joined";
-			else if (type == STB_USER_LEFT)
+			else if (type == SERVER_TECHNICAL_BROADCASTING_STATUS_USER_LEFT)
 				std::cout << "[SERVER]: " << name << " left";
 			std::cout << ANSI("0m") << std::endl;
 
 			THIS_CLIENT.printInput();
+		}
+		else if (code == FORWARDING_PRIVATE_MESSAGE)
+		{
+			char status = buffer[1];
+			if (status == FORWARDING_PRIVATE_MESSAGE_STATUS_OK)
+			{
+				const char* sender = buffer + 1 + 1;
+				const char* receiver = buffer + 1 + 1 + USERNAME_LENGTH;
+				const char* message = buffer + 1 + 1 + USERNAME_LENGTH + USERNAME_LENGTH;
+
+				std::cout << ANSI("u") << ANSI("J");
+				std::cout << ANSI("3m");
+				
+				std::cout << "<" << sender << " -> " << receiver << "> " << message;
+
+				std::cout << ANSI("0m") << std::endl;
+
+				THIS_CLIENT.printInput();
+			}
+			else if (status == FORWARDING_PRIVATE_MESSAGE_STATUS_USER_NOT_FOUND)
+			{
+				const char* misspelledName = buffer + 1 + 1;
+
+				std::cout << ANSI("u") << ANSI("J");
+				std::cout << ANSI("31;3m");
+
+				std::cout << "[SERVER]: " << "User '" << misspelledName << "' not found";
+
+				std::cout << ANSI("0m") << std::endl;
+
+				THIS_CLIENT.printInput();
+			}
 		}
 	}
 }
@@ -214,7 +253,14 @@ void listenConsole()
 
 			std::cout << "\n\r[" << THIS_CLIENT.username << "]: ";
 
-			status = sendMessage(THIS_CLIENT.inputLine.c_str());
+			if (THIS_CLIENT.inputLine[0] == PRIVATE_MESSAGE_REFERENCE_CODE)
+			{
+				size_t space = THIS_CLIENT.inputLine.find(',');
+				std::string name = THIS_CLIENT.inputLine.substr(1, std::min<size_t>(space - 1, USERNAME_LENGTH - 1));
+				sendPrivateMessage(name.c_str(), THIS_CLIENT.inputLine.c_str() + 1 + space + 1);
+			}
+			else status = sendMessage(THIS_CLIENT.inputLine.c_str());
+
 			if (status == SOCKET_ERROR)
 			{
 				THIS_CLIENT.running = false;
@@ -230,12 +276,22 @@ void listenConsole()
 //Cryptography? - Brooooo, never heard about that
 int sendMessage(const char* message)
 {
-	char msg[SENDING_MESSAGE_L];
-	memset(msg, 0, SENDING_MESSAGE_L);
+	char msg[SENDING_MESSAGE_LENGTH];
+	memset(msg, 0, SENDING_MESSAGE_LENGTH);
 	msg[0] = SENDING_MESSAGE;
 	copyarray(message, msg, 0, 1, std::min<size_t>(strlen(message), MESSAGE_LENGTH - 1));
 
-	return THIS_CLIENT.snd(msg, SENDING_MESSAGE_L);
+	return THIS_CLIENT.snd(msg, SENDING_MESSAGE_LENGTH);
+}
+int sendPrivateMessage(const char* toUser, const char* message)
+{
+	char packet[SENDING_PRIVATE_MESSAGE_LENGTH];
+	memset(packet, 0, SENDING_PRIVATE_MESSAGE_LENGTH);
+	packet[0] = SENDING_PRIVATE_MESSAGE;
+	copyarray(toUser, packet, 0, 1, USERNAME_LENGTH - 1);
+	copyarray(message, packet, 0, 1 + USERNAME_LENGTH, std::min<size_t>(strlen(message), MESSAGE_LENGTH - 1));
+
+	return THIS_CLIENT.snd(packet, SENDING_PRIVATE_MESSAGE_LENGTH);
 }
 
 #endif

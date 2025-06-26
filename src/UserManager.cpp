@@ -26,12 +26,26 @@ int User::snd(const char* buf, int size) const { return send(sock, buf, size, 0)
 int User::rcv(char* buf, int size) const { return recv(sock, buf, size, 0); }
 
 
-
 void broadcastMessage(const User* author, const char* message);
 void broadcastSTB(unsigned char code, const User* user);
 
+void forwardPrivateMessage(const User* sender, const char* receiver, const char* message);
+
+
+struct UserThread
+{
+	const User* user;
+	std::thread* thread;
+};
+struct UserThreadPool
+{
+	UserThread* userthreads;
+	size_t size;
+	size_t current;
+} UTP;
+
 bool utpFull();
-bool utpHasUsername(const char* username);
+size_t utpFindUserByName(const char* username);
 void utpUpdateCurrent();
 void utpClear();
 
@@ -39,11 +53,11 @@ void utpClear();
 
 bool handshake(const User* user)
 {
-	char hsh_c[HANDSHAKE_L_CS];
-	user->rcv(hsh_c, HANDSHAKE_L_CS);
+	char hsh_c[HANDSHAKE_LENGTH_CS];
+	user->rcv(hsh_c, HANDSHAKE_LENGTH_CS);
 	const char* username = hsh_c + 1 + GC_PROTOCOL_VERSION_LENGTH;
 
-	char hsh[HANDSHAKE_L_SC];
+	char hsh[HANDSHAKE_LENGTH_SC];
 	hsh[0] = HANDSHAKE;
 	
 	bool flag = true;
@@ -63,7 +77,11 @@ bool handshake(const User* user)
 		hsh[2] = GC_PROTOCOL_VERSION_MAJOR;
 		hsh[3] = GC_PROTOCOL_VERSION_MINOR;
 	}
-	else if (utpHasUsername(username))
+	else if (!isValidUsername(username))
+	{
+		hsh[1] = SERVER_ERROR_INVALID_USERNAME;
+	}
+	else if (utpFindUserByName(username) < UTP.size)
 	{
 		hsh[1] = SERVER_ERROR_DUPLICATE_USERNAME;
 	}
@@ -73,7 +91,7 @@ bool handshake(const User* user)
 		flag = false;
 	}
 	
-	user->snd(hsh, HANDSHAKE_L_SC);
+	user->snd(hsh, HANDSHAKE_LENGTH_SC);
 
 	if (!flag)
 	{
@@ -88,7 +106,7 @@ void handle(const User* user)
 {
 	int status = 0;
 
-	broadcastSTB(STB_USER_JOINED, user);
+	broadcastSTB(SERVER_TECHNICAL_BROADCASTING_STATUS_USER_JOINED, user);
 
 	while (true)
 	{
@@ -108,28 +126,20 @@ void handle(const User* user)
 			LOG(ANSI("2m") << "<" << user->getName() << "> " << message << ANSI("0m"));
 			broadcastMessage(user, message);
 		}
+		else if (code == SENDING_PRIVATE_MESSAGE)
+		{
+			const char* toUser = buffer + 1;
+			const char* message = buffer + 1 + USERNAME_LENGTH;
+			LOG(ANSI("2m") << "<" << user->getName() << " -> " << toUser << "> " << message << ANSI("0m"));
+			forwardPrivateMessage(user, toUser, message);
+		}
 		else LOG("Client sent invalid data");
 	}
 
 	LOG("Client left (" << user->getName() << ")");
 
-	broadcastSTB(STB_USER_LEFT, user);
+	broadcastSTB(SERVER_TECHNICAL_BROADCASTING_STATUS_USER_LEFT, user);
 }
-
-
-
-struct UserThread
-{
-	const User* user;
-	std::thread* thread;
-};
-struct UserThreadPool
-{
-	UserThread* userthreads;
-	size_t size;
-	size_t current;
-} UTP;
-
 
 
 void utpInit(int backlog)
@@ -152,15 +162,17 @@ void utpAdd(const User* user)
 	utpClear();
 }
 
-bool utpHasUsername(const char* username)
+
+size_t utpFindUserByName(const char* username)
 {
 	for (size_t i = 0; i < UTP.size; i++)
 	{
 		const User* user = UTP.userthreads[i].user;
-		if (user && user->isActive() && !strcmp(user->getName(), username)) return true;
+		if (user && user->isActive() && !strcmp(user->getName(), username)) return i;
 	}
-	return false;
+	return UTP.size;
 }
+
 
 void utpUpdateCurrent()
 {
@@ -200,22 +212,49 @@ void broadcast(const char* packet, int size)
 
 void broadcastSTB(unsigned char code, const User* user)
 {
-	char stb[SERVER_TECHNICAL_BROADCASTING_L];
+	char stb[SERVER_TECHNICAL_BROADCASTING_LENGTH];
 	stb[0] = SERVER_TECHNICAL_BROADCASTING;
 	stb[1] = code;
 	copyarray(user->getName(), stb, 0, 1 + 1, USERNAME_LENGTH);
 
-	broadcast(stb, SERVER_TECHNICAL_BROADCASTING_L);
+	broadcast(stb, SERVER_TECHNICAL_BROADCASTING_LENGTH);
 }
 void broadcastMessage(const User* author, const char* message)
 {
-	char packet[BROADCASTING_MESSAGE_L];
-	memset(packet, 0, BROADCASTING_MESSAGE_L);
+	char packet[BROADCASTING_MESSAGE_LENGTH];
+	memset(packet, 0, BROADCASTING_MESSAGE_LENGTH);
 	packet[0] = BROADCASTING_MESSAGE;
 	copyarray(author->getName(), packet, 0, 1, USERNAME_LENGTH);
 	copyarray(message, packet, 0, 1 + USERNAME_LENGTH, strlen(message));
 
-	broadcast(packet, BROADCASTING_MESSAGE_L);
+	broadcast(packet, BROADCASTING_MESSAGE_LENGTH);
+}
+
+void forwardPrivateMessage(const User* sender, const char* receiverName, const char* message)
+{
+	char packet[FORWARDING_PRIVATE_MESSAGE_LENGTH];
+	memset(packet, 0, FORWARDING_PRIVATE_MESSAGE_LENGTH);
+	packet[0] = FORWARDING_PRIVATE_MESSAGE;
+	
+	size_t receiverId = utpFindUserByName(receiverName);
+	if (receiverId < UTP.size)
+	{
+		packet[1] = FORWARDING_PRIVATE_MESSAGE_STATUS_OK;
+		copyarray(sender->getName(), packet, 0, 1 + 1, USERNAME_LENGTH - 1);
+		copyarray(receiverName, packet, 0, 1 + 1 + USERNAME_LENGTH, USERNAME_LENGTH - 1);
+		copyarray(message, packet, 0, 1 + 1 + USERNAME_LENGTH + USERNAME_LENGTH, strlen(message));
+
+		const User* receiver = UTP.userthreads[receiverId].user;
+		receiver->snd(packet, FORWARDING_PRIVATE_MESSAGE_LENGTH);
+		sender->snd(packet, FORWARDING_PRIVATE_MESSAGE_LENGTH);
+	}
+	else
+	{
+		packet[1] = FORWARDING_PRIVATE_MESSAGE_STATUS_USER_NOT_FOUND;
+		copyarray(receiverName, packet, 0, 1 + 1, USERNAME_LENGTH - 1);
+		LOG("PM receiver '" << receiverName << "' wasnt found. Sending back error");
+		sender->snd(packet, 1 + 1 + USERNAME_LENGTH);
+	}
 }
 
 #endif

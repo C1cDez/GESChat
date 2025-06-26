@@ -1,6 +1,7 @@
 #include "GESChat.h"
 
 #include <iostream>
+#include <cctype>
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -37,3 +38,12 @@ int compareGCProtocolVersion(unsigned char major, unsigned char minor)
     return clientVersion - thisVersion;
 }
 
+bool isValidUsername(const char* username)
+{
+    for (size_t i = 0; i < USERNAME_LENGTH; i++)
+    {
+        char c = username[i];
+        if (c && !isalnum(c) && c != '_') return false;
+    }
+    return true;
+}

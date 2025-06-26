@@ -10,8 +10,6 @@ void run(int argc, char* argv[]);
 #define DEFAULT_PORT "1488"
 #define MAX_BACKLOG "128"
 
-#define CLIENT_EXIT_CODE "~!"
-
 #define ANSI(code) "\x1b[" << code
 
 #ifdef SERVER
@@ -26,5 +24,7 @@ struct ArgsParser
 	const char* getOrDefault(const char* key, const char* def) const;
 };
 
+
+bool isValidUsername(const char* username);
 
 void copyarray(const char* source, char* dest, size_t soff, size_t doff, size_t len);

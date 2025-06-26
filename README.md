@@ -12,14 +12,14 @@ Libs: [Winsock2](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/)
 
 ### Server
 **How to run**: <br>
-In command line `geschat-server-gcp-X.Y.exe`. Additional command line arguments:
+In command line `geschat-server-V-pX.Y.exe`. Additional command line arguments:
 
 | Key | Meaning | Default Value |
 |---|---|---|
 | -p | Port to open server on | 1488
 | -b | Backlog of a server (max users) | 128
 
-e.g. `geschat-server-gcp-1.0.exe -p 1161 -b 18` stands for opening server on port 1161 with server's backlog being 18 clients.
+e.g. `geschat-server-1.0.0-p1.0.exe -p 1161 -b 18` stands for opening server on port 1161 with server's backlog being 18 clients.
 
 **How to exit**:<br>
 Just abort like console program using Ctrl+C.
@@ -30,17 +30,21 @@ Just abort like console program using Ctrl+C.
 ### Client
 
 **How to run**: <br>
-In command line `geschat-client-gcp-X.Y.exe`. Additional command line arguments:
+In command line `geschat-client-V-pX.Y.exe`. Additional command line arguments:
 
 | Key | Meaning | Default Value |
 |---|---|---|
 | -h | Host of server to connect to | 127.0.0.1 (localhost)
 | -p | Port on server to connect to | 1488
 
-e.g. `geschat-client-gcp-1.0.exe -p 1161 -h 148.81.161.18` will connect to `148.81.161.18:1161`
+e.g. `geschat-client-1.0.0-p1.0.exe -p 1161 -h 148.81.161.18` will connect to `148.81.161.18:1161`
 
-**Technical**<br>
-Client uses [ANSI](https://en.wikipedia.org/wiki/ANSI_escape_code) to handle text in console (see Client.cpp)
+**Username**<br>
+Username must contain only _latin letters_ (upper and lower case), _numbers_ (0-9) and _underscores_ (_). <br>
+Username length is 16 characters (16 bytes).
+
+**Sending Private Message**<br>
+Type `@` followed by the name of user you want to send private message to. Name is separated from message by comma and space `, `.
 
 **How to exit**:<br>
 Type `~!` as a message. It will (probably) safely close all sockets.
@@ -49,7 +53,7 @@ Type `~!` as a message. It will (probably) safely close all sockets.
 
 ### GC Protocol
 
-Current Version of GESChat Protocol: 1.0
+Current Version of GESChat Protocol: 1.1
 
 **Sizes** <br>
 <ins>Username</ins> length is 17 bytes long, but only 16 of them are used to store information, last one is reserved as 0 for C-string. <br>
@@ -61,6 +65,8 @@ In every packet, 0th byte stands for the _type_ of sent packet:
 * 0x02 - Client sends message to server
 * 0x03 - Server broadcasts message to clients
 * 0x04 - Server broadcasts technical information (joining & leaving of users)
+* 0x05 - Sending private message (from client)
+* 0x06 - Forwarding private message (from server)
 
 The rest is additional information (depending on the _type_)
 
@@ -82,10 +88,10 @@ Server responses with:
 
 Server Error Code:
 * 0x40 - Server OK (no error)
-* 0x41 - ~~Server disconnected~~ (DEPRECATED)
-* 0x42 - Incompatable Protocol Version
-* 0x43 - Server Transcended User Limit
-* 0x44 - Client with this Username is already on the Server
+* 0x41 - Incompatable Protocol Version
+* 0x42 - Server Transcended User Limit
+* 0x43 - Client with this Username is already on the Server
+* 0x44 - Invalid username
 
 **Sending Message (258)** <br>
 | Bytes | [0] | [1] - [257] |
@@ -108,6 +114,9 @@ Server Error Code:
 Server Technical Broadcasting Code:
 * 0x20 - User joined
 * 0x21 - User left
+
+**Sending Private Messages**
+
 
 **Future** <br>
 Make encrypting and decrypting messages
