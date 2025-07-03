@@ -4,13 +4,16 @@
 
 #ifdef SERVER
 
-#include "GCProtocol.h"
-
 #include <iostream>
 #include <windows.h>
 #include <ws2tcpip.h>
 
+#include "GCProtocol.h"
+#include "ConsoleHandler.h"
+
 #pragma comment(lib, "ws2_32.lib")
+
+#define PRIVATE_MESSAGE_REFERENCE_CODE '@'
 
 
 
@@ -29,8 +32,7 @@ int User::rcv(char* buf, int size) const { return recv(sock, buf, size, 0); }
 void broadcastMessage(const User* author, const char* message);
 void broadcastSTB(unsigned char code, const User* user);
 
-void forwardPrivateMessage(const User* sender, const char* receiver, const char* message);
-
+void forwardPrivateMessage(const User* author, const char* rawmsg);
 
 struct UserThread
 {
@@ -55,6 +57,7 @@ bool handshake(const User* user)
 {
 	char hsh_c[HANDSHAKE_LENGTH_CS];
 	user->rcv(hsh_c, HANDSHAKE_LENGTH_CS);
+	hsh_c[HANDSHAKE_LENGTH_CS - 1] = 0;
 	const char* username = hsh_c + 1 + GC_PROTOCOL_VERSION_LENGTH;
 
 	char hsh[HANDSHAKE_LENGTH_SC];
@@ -64,27 +67,21 @@ bool handshake(const User* user)
 	if (hsh_c[0] != HANDSHAKE)
 	{
 		hsh[1] = INVALID_DATA;
-		LOG("Client sent invalid data");
+		LOGn("Client sent invalid data");
 	}
 	else if (utpFull())
-	{
 		hsh[1] = SERVER_ERROR_TRANSCENDED_BACKLOG;
-	}
 	else if (compareGCProtocolVersion(hsh_c[1], hsh_c[2]))
 	{
-		LOG("Client sent incompatable protocol version");
+		LOGn("Client sent incompatable protocol version");
 		hsh[1] = SERVER_ERROR_INCOMPATABLE_PROTOCOL_VERSION;
 		hsh[2] = GC_PROTOCOL_VERSION_MAJOR;
 		hsh[3] = GC_PROTOCOL_VERSION_MINOR;
 	}
 	else if (!isValidUsername(username))
-	{
 		hsh[1] = SERVER_ERROR_INVALID_USERNAME;
-	}
 	else if (utpFindUserByName(username) < UTP.size)
-	{
 		hsh[1] = SERVER_ERROR_DUPLICATE_USERNAME;
-	}
 	else
 	{
 		hsh[1] = SERVER_OK;
@@ -96,7 +93,7 @@ bool handshake(const User* user)
 	if (!flag)
 	{
 		user->setName(username);
-		LOG(username << " joined");
+		LOGn(username << " joined");
 	}
 
 	return flag;
@@ -117,26 +114,25 @@ void handle(const User* user)
 			user->setActive(false);
 			break;
 		}
+		buffer[MAX_SERVER_POSSIBLE_INPUT - 1] = 0;
 
 		char code = buffer[0];
 		
 		if (code == SENDING_MESSAGE)
 		{
-			const char* message = buffer + 1;
-			LOG(ANSI("2m") << "<" << user->getName() << "> " << message << ANSI("0m"));
-			broadcastMessage(user, message);
+			char* message = buffer + 1;
+			removeANSIEscapeSequences(message, strlen(message));
+			LOGn(ANSI("2m") << "<" << user->getName() << "> " << message << ANSI("0m"));
+
+			if (message[0] == PRIVATE_MESSAGE_REFERENCE_CODE)
+				forwardPrivateMessage(user, message);
+			else
+				broadcastMessage(user, message);
 		}
-		else if (code == SENDING_PRIVATE_MESSAGE)
-		{
-			const char* toUser = buffer + 1;
-			const char* message = buffer + 1 + USERNAME_LENGTH;
-			LOG(ANSI("2m") << "<" << user->getName() << " -> " << toUser << "> " << message << ANSI("0m"));
-			forwardPrivateMessage(user, toUser, message);
-		}
-		else LOG("Client sent invalid data");
+		else LOGn("Client sent invalid data");
 	}
 
-	LOG("Client left (" << user->getName() << ")");
+	LOGn("Client left (" << user->getName() << ")");
 
 	broadcastSTB(SERVER_TECHNICAL_BROADCASTING_STATUS_USER_LEFT, user);
 }
@@ -215,7 +211,8 @@ void broadcastSTB(unsigned char code, const User* user)
 	char stb[SERVER_TECHNICAL_BROADCASTING_LENGTH];
 	stb[0] = SERVER_TECHNICAL_BROADCASTING;
 	stb[1] = code;
-	copyarray(user->getName(), stb, 0, 1 + 1, USERNAME_LENGTH);
+	copyarray(user->getName(), stb, 0, 1 + 1, USERNAME_LENGTH - 1);
+	stb[SERVER_TECHNICAL_BROADCASTING_LENGTH - 1] = 0;
 
 	broadcast(stb, SERVER_TECHNICAL_BROADCASTING_LENGTH);
 }
@@ -224,36 +221,60 @@ void broadcastMessage(const User* author, const char* message)
 	char packet[BROADCASTING_MESSAGE_LENGTH];
 	memset(packet, 0, BROADCASTING_MESSAGE_LENGTH);
 	packet[0] = BROADCASTING_MESSAGE;
-	copyarray(author->getName(), packet, 0, 1, USERNAME_LENGTH);
-	copyarray(message, packet, 0, 1 + USERNAME_LENGTH, strlen(message));
+	copyarray(author->getName(), packet, 0, 1, USERNAME_LENGTH - 1);
+	copyarray(message, packet, 0, 1 + USERNAME_LENGTH, std::min<size_t>(strlen(message), MESSAGE_LENGTH - 1));
+	packet[BROADCASTING_MESSAGE_LENGTH - 1] = 0;
 
 	broadcast(packet, BROADCASTING_MESSAGE_LENGTH);
 }
 
-void forwardPrivateMessage(const User* sender, const char* receiverName, const char* message)
+void forwardPrivateMessage(const User* author, const char* rawmsg)
 {
-	char packet[FORWARDING_PRIVATE_MESSAGE_LENGTH];
-	memset(packet, 0, FORWARDING_PRIVATE_MESSAGE_LENGTH);
-	packet[0] = FORWARDING_PRIVATE_MESSAGE;
-	
-	size_t receiverId = utpFindUserByName(receiverName);
+	size_t comma = 0;
+
+	char name[USERNAME_LENGTH];
+	memset(name, 0, USERNAME_LENGTH);
+	for (size_t i = 0; i < USERNAME_LENGTH - 1; i++)
+	{
+		if (rawmsg[i + 1] == ',' || rawmsg[i + 1] == ' ')
+		{
+			comma = i + 2;
+			break;
+		}
+		else name[i] = rawmsg[i + 1];
+	}
+	const char* message = rawmsg + comma;
+
+	size_t receiverId = utpFindUserByName(name);
 	if (receiverId < UTP.size)
 	{
-		packet[1] = FORWARDING_PRIVATE_MESSAGE_STATUS_OK;
-		copyarray(sender->getName(), packet, 0, 1 + 1, USERNAME_LENGTH - 1);
-		copyarray(receiverName, packet, 0, 1 + 1 + USERNAME_LENGTH, USERNAME_LENGTH - 1);
-		copyarray(message, packet, 0, 1 + 1 + USERNAME_LENGTH + USERNAME_LENGTH, strlen(message));
-
 		const User* receiver = UTP.userthreads[receiverId].user;
+
+		char packet[FORWARDING_PRIVATE_MESSAGE_LENGTH];
+		memset(packet, 0, FORWARDING_PRIVATE_MESSAGE_LENGTH);
+		packet[0] = FORWARDING_PRIVATE_MESSAGE;
+		packet[1] = FORWARDING_PRIVATE_MESSAGE_STATUS_OK;
+		copyarray(author->getName(), packet, 0, 1 + 1, USERNAME_LENGTH - 1);
+		copyarray(name, packet, 0, 1 + 1 + USERNAME_LENGTH, USERNAME_LENGTH - 1);
+		copyarray(message, packet, 0, 1 + 1 + USERNAME_LENGTH * 2, std::min<size_t>(strlen(message), MESSAGE_LENGTH - 1));
+		packet[FORWARDING_PRIVATE_MESSAGE_LENGTH - 1] = 0;
+
 		receiver->snd(packet, FORWARDING_PRIVATE_MESSAGE_LENGTH);
-		sender->snd(packet, FORWARDING_PRIVATE_MESSAGE_LENGTH);
+		author->snd(packet, FORWARDING_PRIVATE_MESSAGE_LENGTH);
 	}
 	else
 	{
+		const size_t size = 1 + 1 + USERNAME_LENGTH;
+		char packet[size];
+		memset(packet, 0, size);
+		packet[0] = FORWARDING_PRIVATE_MESSAGE;
 		packet[1] = FORWARDING_PRIVATE_MESSAGE_STATUS_USER_NOT_FOUND;
-		copyarray(receiverName, packet, 0, 1 + 1, USERNAME_LENGTH - 1);
-		LOG("PM receiver '" << receiverName << "' wasnt found. Sending back error");
-		sender->snd(packet, 1 + 1 + USERNAME_LENGTH);
+		copyarray(name, packet, 0, 1 + 1, USERNAME_LENGTH - 1);
+		packet[size - 1] = 0;
+
+		LOGn("User '" << name << "' not found. Sending error back");
+
+		author->snd(packet, size);
 	}
 }
 

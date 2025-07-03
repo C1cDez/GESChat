@@ -1,4 +1,5 @@
 #include "GESChat.h"
+#include "ConsoleHandler.h"
 
 #include <string>
 #include <iostream>

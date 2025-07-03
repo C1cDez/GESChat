@@ -44,7 +44,7 @@ Username must contain only _latin letters_ (upper and lower case), _numbers_ (0-
 Username length is 16 characters (16 bytes).
 
 **Sending Private Message**<br>
-Type `@` followed by the name of user you want to send private message to. Name is separated from message by comma and space `, `.
+Type `@` followed by the name of user you want to send private message to. Name is separated from message by comma `,`.
 
 **How to exit**:<br>
 Type `~!` as a message. It will (probably) safely close all sockets.
@@ -53,7 +53,7 @@ Type `~!` as a message. It will (probably) safely close all sockets.
 
 ### GC Protocol
 
-Current Version of GESChat Protocol: 1.1
+Current Version of GESChat Protocol: 1.2
 
 **Sizes** <br>
 <ins>Username</ins> length is 17 bytes long, but only 16 of them are used to store information, last one is reserved as 0 for C-string. <br>
@@ -65,10 +65,9 @@ In every packet, 0th byte stands for the _type_ of sent packet:
 * 0x02 - Client sends message to server
 * 0x03 - Server broadcasts message to clients
 * 0x04 - Server broadcasts technical information (joining & leaving of users)
-* 0x05 - Sending private message (from client)
-* 0x06 - Forwarding private message (from server)
+* 0x05 - Forwarding private message (from server)
 
-The rest is additional information (depending on the _type_)
+The rest is additional information (depending on the _type_).
 
 
 **Handshake (20), (4)** <br>
@@ -115,11 +114,21 @@ Server Technical Broadcasting Code:
 * 0x20 - User joined
 * 0x21 - User left
 
-**Sending Private Messages**
+**Private Messages** <br>
+If client's message starts with `@`, server identifies it as a private message, and forwards it to user mentioned after `@`.
+| Bytes | [0] | [1] | [2] - [18] | [19] - [35] | [36] - [292] |
+|-|-|-|-|-|-|
+| | 0x05 | FPMC | ... | ... | ... |
+| | Forwarding Private Message type | Forwarding Private Message Codes | Sender's Username | Receiver's Username | Message |
 
+Forwarding Private Messages Codes:
+* 0x11 - OK
+* 0x12 - Receiver User not found
+
+---
 
 **Future** <br>
-Make encrypting and decrypting messages
+Make encrypting and decrypting messages.
 
 ---
 

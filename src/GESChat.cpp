@@ -47,3 +47,25 @@ bool isValidUsername(const char* username)
     }
     return true;
 }
+
+void enableANSI()
+{
+    SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+}
+void removeANSIEscapeSequences(char* data, size_t size)
+{
+    for (size_t i = 0; i < size; i++)
+    {
+        if (data[i] == '\x1b') data[i] = '~';
+    }
+}
+
+std::string stbStatus2String(const char type)
+{
+    switch (type)
+    {
+    case SERVER_TECHNICAL_BROADCASTING_STATUS_USER_JOINED: return "joined";
+    case SERVER_TECHNICAL_BROADCASTING_STATUS_USER_LEFT: return "left";
+    default: return "";
+    }
+}

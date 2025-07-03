@@ -1,0 +1,36 @@
+
+v1.1.0 - 03.07.2025
+	Private messages were added.
+
+	Protocol: 1.2
+
+	Added:
+		* Private messages are introduced. Type '@' to write someone.
+		* Added changelog.txt.
+
+	Changed:
+		* Protocol version 1.0 -> 1.2
+		* Limited available characters in username. Now only Latin
+		letters (lower and upper case), numbers and underscores can be
+		used in username.
+
+	Fixed:
+		* Client's console output is now mutex-locked.
+		* Client can't send empty lines.
+		* Client now maybe support ANSI escape codes.
+		* Server clears all ANSI escape sequences in received messages
+		from client.
+		* Every last byte in sent packets is now 0 to prevent buffer
+		leaking issues.
+
+
+
+v1.0.0 - 24.06.2025
+	Initial GES Chat version.
+
+	Protocol: 1.0
+
+	Added:
+		* Communication between client and server.
+		* Client console interface.
+

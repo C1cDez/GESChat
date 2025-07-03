@@ -6,25 +6,28 @@
 #include <string>
 #include <cstring>
 #include <thread>
+#include <mutex>
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
 #include "GCProtocol.h"
+#include "ConsoleHandler.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
 #define CLIENT_EXIT_CODE "~!"
-#define PRIVATE_MESSAGE_REFERENCE_CODE '@'
+
+
 
 SOCKET init(PCSTR host, PCSTR port);
 void handshake();
 
 void listenConsole();
 int sendMessage(const char* message);
-int sendPrivateMessage(const char* toUser, const char* message);
 
 void listenServer();
+std::string stbStatus2String(const char type);
 
 struct Client
 {
@@ -32,24 +35,26 @@ struct Client
 	const char* username;
 	bool running;
 
-	std::string inputLine = "";
+	std::mutex mtx;
 
-	void printInput() const;
+	std::string inputLine = "";
 
 	int snd(const char* buf, int len) const;
 	int rcv(char* buf, int len) const;
 } THIS_CLIENT{ INVALID_SOCKET, nullptr, false };
 
+#define C_CH_SAVE_AND_PRINT_INPUT ANSI("s") << "\n\r[" << THIS_CLIENT.username << "]: " << THIS_CLIENT.inputLine
+#define C_CH_RETURN_BACK_AND_ERASE ANSI("u") << ANSI("J")
+
+
+
 int Client::snd(const char* buf, int len) const { return send(sock, buf, len, 0); }
 int Client::rcv(char* buf, int len) const { return recv(sock, buf, len, 0); }
-void Client::printInput() const
-{
-	std::cout << ANSI("s"); 
-	std::cout << "\n\r[" << username << "]: " << inputLine;
-}
 
 void run(int argc, char* argv[])
 {
+	enableANSI();
+
 	std::cout << "Using GC Protocol Version: " << (int)GC_PROTOCOL_VERSION_MAJOR << "." << (int)GC_PROTOCOL_VERSION_MINOR << std::endl;
 
 	ArgsParser ap{ argc, argv };
@@ -79,11 +84,13 @@ void run(int argc, char* argv[])
 
 	THIS_CLIENT.running = true;
 
-	std::thread* serverListener = new std::thread{ listenServer };
+	std::thread serverListener{ listenServer };
+	serverListener.detach();
+
 	listenConsole();
 
 	closesocket(sock);
-	std::cout << "Client closed" << std::endl;
+	std::cout << "\n\rClient closed" << std::endl;
 	WSACleanup();
 }
 
@@ -120,6 +127,8 @@ void handshake()
 	hsh[1] = GC_PROTOCOL_VERSION_MAJOR;
 	hsh[2] = GC_PROTOCOL_VERSION_MINOR;
 	copyarray(THIS_CLIENT.username, hsh, 0, 1 + GC_PROTOCOL_VERSION_LENGTH, strlen(THIS_CLIENT.username));
+	hsh[HANDSHAKE_LENGTH_CS - 1] = 0;
+
 	THIS_CLIENT.snd(hsh, HANDSHAKE_LENGTH_CS);
 
 	char hsh_s[HANDSHAKE_LENGTH_SC];
@@ -161,63 +170,54 @@ void listenServer()
 
 		char code = buffer[0];
 
-		//TODO: REWRITE IT
 		if (code == BROADCASTING_MESSAGE)
 		{
 			const char* name = buffer + 1;
 			const char* message = buffer + 1 + USERNAME_LENGTH;
 
-			std::cout << ANSI("u") << ANSI("J");
-			std::cout << "<" << name << "> " << message << std::endl;
-
-			THIS_CLIENT.printInput();
+			CH_MTXLCK_PRINT( THIS_CLIENT.mtx,
+				C_CH_RETURN_BACK_AND_ERASE << 
+				"<" << name << "> " << message << "\n\r" <<
+				C_CH_SAVE_AND_PRINT_INPUT
+			);
 		}
 		else if (code == SERVER_TECHNICAL_BROADCASTING)
 		{
-			char type = buffer[1];
 			const char* name = buffer + 1 + 1;
-			
-			std::cout << ANSI("u") << ANSI("J");
 
-			std::cout << ANSI("33;3;1m");
-			if (type == SERVER_TECHNICAL_BROADCASTING_STATUS_USER_JOINED)
-				std::cout << "[SERVER]: " << name << " joined";
-			else if (type == SERVER_TECHNICAL_BROADCASTING_STATUS_USER_LEFT)
-				std::cout << "[SERVER]: " << name << " left";
-			std::cout << ANSI("0m") << std::endl;
-
-			THIS_CLIENT.printInput();
+			CH_MTXLCK_PRINT(THIS_CLIENT.mtx,
+				C_CH_RETURN_BACK_AND_ERASE << ANSI("3m") << ANSI("33;1m") <<
+				"[SERVER]: " << name << " " << stbStatus2String(buffer[1]) <<
+				ANSI("0m") << "\n\r" <<
+				C_CH_SAVE_AND_PRINT_INPUT
+			);
 		}
 		else if (code == FORWARDING_PRIVATE_MESSAGE)
 		{
-			char status = buffer[1];
-			if (status == FORWARDING_PRIVATE_MESSAGE_STATUS_OK)
+			char type = buffer[1];
+			if (type == FORWARDING_PRIVATE_MESSAGE_STATUS_OK)
 			{
 				const char* sender = buffer + 1 + 1;
 				const char* receiver = buffer + 1 + 1 + USERNAME_LENGTH;
 				const char* message = buffer + 1 + 1 + USERNAME_LENGTH + USERNAME_LENGTH;
 
-				std::cout << ANSI("u") << ANSI("J");
-				std::cout << ANSI("3m");
-				
-				std::cout << "<" << sender << " -> " << receiver << "> " << message;
-
-				std::cout << ANSI("0m") << std::endl;
-
-				THIS_CLIENT.printInput();
+				CH_MTXLCK_PRINT( THIS_CLIENT.mtx,
+					C_CH_RETURN_BACK_AND_ERASE << ANSI("3m") << 
+					"<" << sender << " -> " << receiver << "> " << message << 
+					ANSI("0m") << "\n\r" <<
+					C_CH_SAVE_AND_PRINT_INPUT
+				);
 			}
-			else if (status == FORWARDING_PRIVATE_MESSAGE_STATUS_USER_NOT_FOUND)
+			else if (type == FORWARDING_PRIVATE_MESSAGE_STATUS_USER_NOT_FOUND)
 			{
 				const char* misspelledName = buffer + 1 + 1;
 
-				std::cout << ANSI("u") << ANSI("J");
-				std::cout << ANSI("31;3m");
-
-				std::cout << "[SERVER]: " << "User '" << misspelledName << "' not found";
-
-				std::cout << ANSI("0m") << std::endl;
-
-				THIS_CLIENT.printInput();
+				CH_MTXLCK_PRINT( THIS_CLIENT.mtx,
+					C_CH_RETURN_BACK_AND_ERASE << ANSI("3m") << ANSI("31m") <<
+					"[SERVER]: " << "User '" << misspelledName << "' not found" << 
+					ANSI("0m") << "\n\r" <<
+					C_CH_SAVE_AND_PRINT_INPUT
+				);
 			}
 		}
 	}
@@ -225,9 +225,10 @@ void listenServer()
 
 void listenConsole()
 {
-	THIS_CLIENT.printInput();
+	CH_MTXLCK_PRINT(THIS_CLIENT.mtx, ANSI("s"));
 
 	char ch;
+	getchar();     //Skip first \n from gathering name
 	int status = 0;
 
 	while (true)
@@ -251,15 +252,15 @@ void listenConsole()
 				break;
 			}
 
-			std::cout << "\n\r[" << THIS_CLIENT.username << "]: ";
-
-			if (THIS_CLIENT.inputLine[0] == PRIVATE_MESSAGE_REFERENCE_CODE)
+			if (THIS_CLIENT.inputLine.empty())
 			{
-				size_t space = THIS_CLIENT.inputLine.find(',');
-				std::string name = THIS_CLIENT.inputLine.substr(1, std::min<size_t>(space - 1, USERNAME_LENGTH - 1));
-				sendPrivateMessage(name.c_str(), THIS_CLIENT.inputLine.c_str() + 1 + space + 1);
+				CH_MTXLCK_PRINT(THIS_CLIENT.mtx,
+					ANSI("2F") << ANSI("J") << C_CH_SAVE_AND_PRINT_INPUT
+				);
+				continue;
 			}
-			else status = sendMessage(THIS_CLIENT.inputLine.c_str());
+
+			status = sendMessage(THIS_CLIENT.inputLine.c_str());
 
 			if (status == SOCKET_ERROR)
 			{
@@ -280,18 +281,9 @@ int sendMessage(const char* message)
 	memset(msg, 0, SENDING_MESSAGE_LENGTH);
 	msg[0] = SENDING_MESSAGE;
 	copyarray(message, msg, 0, 1, std::min<size_t>(strlen(message), MESSAGE_LENGTH - 1));
+	msg[SENDING_MESSAGE_LENGTH - 1] = 0;
 
 	return THIS_CLIENT.snd(msg, SENDING_MESSAGE_LENGTH);
-}
-int sendPrivateMessage(const char* toUser, const char* message)
-{
-	char packet[SENDING_PRIVATE_MESSAGE_LENGTH];
-	memset(packet, 0, SENDING_PRIVATE_MESSAGE_LENGTH);
-	packet[0] = SENDING_PRIVATE_MESSAGE;
-	copyarray(toUser, packet, 0, 1, USERNAME_LENGTH - 1);
-	copyarray(message, packet, 0, 1 + USERNAME_LENGTH, std::min<size_t>(strlen(message), MESSAGE_LENGTH - 1));
-
-	return THIS_CLIENT.snd(packet, SENDING_PRIVATE_MESSAGE_LENGTH);
 }
 
 #endif
